@@ -1,0 +1,64 @@
+# config/config.yaml
+
+attacker:
+  provider: "ollama"
+  model: "qwen3:14b"
+  port: 11500          # GPU-0
+  temperature: 0.3
+  max_retries: 10            # only one attempt
+  max_turns: 5              # single-turn adversarial attempt
+  plan_revision: true           # whether to extend unsuccessful plans that ran out of phases
+  run_all_strategies: false     # only require one successful strategy per behavior
+  plans_file: "./strategies/attack_plans.json"
+  strategies_per_behavior: 10 # only one strategy per behavior
+
+target:
+  provider: "ollama"
+  model: "qwen3:8b"
+  port: 11501          # GPU-1
+  temperature: 0
+  max_retries: 10             # single attempt against target
+
+textgrad:
+  enabled: false
+  # provider: "openrouter"
+  # model: "qwen/qwen-2.5-72b-instruct:free"
+  # no port needed for cloud provider
+  provider: "ollama"          # was "openrouter"
+  model: "qwen3:32b"     # any model the server hosts
+  port: 11502                 # <— match your running server
+  temperature: 0
+  max_retries: 10             # single optimization pass
+  max_turns_per_phase: 4    # one gradient phase
+
+attack_validation:
+  max_tokens_for_evaluation: 512
+
+multithreading:
+  max_workers: 1
+
+# attack_plan_generator:
+#   provider: "ollama"
+#   model: "qwen2.5:32b-instruct"          # ← use exactly the name shown by `ollama list`
+#   api_key : "ollama"
+#   port: 11502
+#   temperature: 0.5
+#   max_retries: 3
+attack_plan_generator:
+  provider: "openai"
+  model: "gpt-4o"
+  temperature: 0.5
+  max_retries: 3
+  behavior_path: "./behaviors/harmbench_behaviors_text_test.csv"
+  attack_plan_generation_dir: "./strategies"
+  progress_dir: "./strategies/progress"
+  num_behaviors: 5
+
+evaluation:
+  use_gpt_judge: false           # <— turn off GPT-only path
+  judge_provider: "ollama"       # new: use BaseAgent('ollama')
+  judge_model: "qwen3:32b"       # or "wao/qwen3-30b-a3b:latest"
+  judge_port: 11502              # your judge server port
+  # judge_provider: "ollama"
+  # judge_model: "wao/qwen3-30b-a3b:q4_K_M"
+  # judge_port: 11502    # reuse GPU-2 instance
