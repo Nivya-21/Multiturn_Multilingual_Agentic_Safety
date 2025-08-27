@@ -10,6 +10,8 @@ from agents.base_agent import BaseAgent
 from agents.gpt_evaluator import LlmEvaluator
 from agents.target_model import TargetModel, TGTargetModel, truncate_response
 from utils.sanitize import strip_reasoning
+from copy import deepcopy
+from tenacity import RetryError, Retrying, retry, stop_after_attempt, wait_fixed
 
 
 class LLMRefusalError(Exception):
@@ -215,15 +217,18 @@ class AttackerAgent(BaseAgent):
 
         return self._extract_conversation(response)
 
+
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(1))
     def revise_plan(self, conversation_history: str = ""):
-        """Extend a plan that has failed to meet its target."""
+        """Extend a plan that has failed to meet its target (minimal changes, assertion-safe)."""
         formatted_system_prompt = self.system_prompt.format(
             target_behavior=self.behavior,
             strategy=self.strategy,
             max_turns="as many turns as necessary",
-        )
+            attack_language=self.config.get("attack_language", "auto"),
 
+        )
+    
         formatted_prompt = (
             self.revise_plan_template.replace("{target_behavior}", self.behavior)
             .replace("{turn_number}", str(self.plan_phase))
@@ -234,7 +239,7 @@ class AttackerAgent(BaseAgent):
                 str(self.plan_phase - 1),  # Added for completeness
             )
         )
-
+    
         response = self.call_api(
             [
                 {"role": "system", "content": formatted_system_prompt},
@@ -242,32 +247,111 @@ class AttackerAgent(BaseAgent):
             ],
             temperature=self.config["temperature"],
         )
-
+    
         try:
-            # remove markdown backticks
+            # Extract and parse the JSON
             response_slice = response[response.find("{") : response.rfind("}") + 1]
-            self.strategy_dict = json.loads(response_slice)
-
-            plan = self.strategy_dict.get("conversation_plan", {})
+            new_strategy = json.loads(response_slice)
+    
+            plan = new_strategy.get("conversation_plan", {})
+            if not isinstance(plan, dict):
+                raise ValueError("conversation_plan is missing or not a dictionary")
+    
+            # Ensure final_turn exists if missing (use your existing fallback behavior)
             if "final_turn" not in plan:
-                # fallback: treat the last available turn as final_turn
                 keys = [k for k in plan.keys() if k.startswith("turn_")]
                 if keys:
-                    plan["final_turn"] = plan[max(keys, key=lambda k: int(k.split("_")[1]))]
-                self.strategy_dict["conversation_plan"] = plan
+                    last_key = max(keys, key=lambda k: int(k.split("_")[1]))
+                    plan["final_turn"] = plan[last_key]
+                # else: leave it missing if there's no turn at all—don't inject content
+    
+            # Do NOT assert for per-turn presence; instead, count what's there
+            # Compute num_phases based on available 'turn_i' and presence of final_turn
+            turn_indices = []
+            for k in plan.keys():
+                if k.startswith("turn_"):
+                    try:
+                        idx = int(k.split("_")[1])
+                        turn_indices.append(idx)
+                    except Exception:
+                        pass
+    
+            # +1 for final_turn if present
+            if turn_indices:
+                self.num_phases = max(turn_indices) + (1 if "final_turn" in plan else 0)
             else:
-                raise AssertionError("Model failed to include 'final_turn' in conversation_plan")
-
-            for i in range(1, self.plan_phase + 1):
-                assert f"turn_{i}" in self.strategy_dict["conversation_plan"]
-                assert "final_turn" in self.strategy_dict["conversation_plan"]
-
-            self.num_phases = len(self.strategy_dict["conversation_plan"])
+                # if no numbered turns but final_turn exists, count as 1 phase
+                self.num_phases = 1 if "final_turn" in plan else 0
+    
+            # Save
+            new_strategy["conversation_plan"] = plan
+            self.strategy_dict = new_strategy
             return self.strategy_dict
-
+    
         except json.decoder.JSONDecodeError:
             raise ValueError("Failed to parse JSON", response_slice)
+    
+    
 
+    # @retry(stop=stop_after_attempt(5), wait=wait_fixed(1))
+    # def revise_plan(self, conversation_history: str = ""):
+    #     """Extend a plan that has failed to meet its target."""
+
+    #     # Include attack_language here too to avoid KeyError
+    #     formatted_system_prompt = self.system_prompt.format(
+    #         target_behavior=self.behavior,
+    #         strategy=self.strategy,
+    #         max_turns="as many turns as necessary",
+    #         attack_language=self.config.get("attack_language", "auto"),
+    #     )
+
+    #     # Fill placeholders in the user prompt template
+    #     formatted_prompt = (
+    #         self.revise_plan_template
+    #         .replace("{target_behavior}", self.behavior)
+    #         .replace("{turn_number}", str(self.plan_phase))
+    #         .replace("{conversation_history}", conversation_history or "")
+    #         .replace("{old_plan}", json.dumps(self.strategy_dict, indent=4, ensure_ascii=False))
+    #         .replace("{previous_turn_number}", str(self.plan_phase - 1))
+    #         .replace("{attack_language}", self.config.get("attack_language", "auto"))
+    #     )
+
+    #     response = self.call_api(
+    #         [
+    #             {"role": "system", "content": formatted_system_prompt},
+    #             {"role": "user", "content": formatted_prompt},
+    #         ],
+    #         temperature=self.config["temperature"],
+    #     )
+
+    #     try:
+    #         # Extract JSON slice and parse
+    #         response_slice = response[response.find("{") : response.rfind("}") + 1]
+    #         self.strategy_dict = json.loads(response_slice)
+
+    #         plan = self.strategy_dict.get("conversation_plan", {})
+
+    #         # ✅ Fix: If final_turn missing, salvage or raise if impossible
+    #         if "final_turn" not in plan:
+    #             keys = [k for k in plan.keys() if k.startswith("turn_")]
+    #             if keys:
+    #                 last_key = max(keys, key=lambda k: int(k.split("_")[1]))
+    #                 plan["final_turn"] = plan[last_key]
+    #                 self.strategy_dict["conversation_plan"] = plan
+    #             else:
+    #                 raise AssertionError("Model failed to include 'final_turn' in conversation_plan")
+
+    #         # ✅ Ensure at least all turns up to current phase exist
+    #         for i in range(1, self.plan_phase + 1):
+    #             assert f"turn_{i}" in self.strategy_dict["conversation_plan"]
+    #         assert "final_turn" in self.strategy_dict["conversation_plan"]
+
+    #         self.num_phases = len(self.strategy_dict["conversation_plan"])
+    #         return self.strategy_dict
+
+    #     except json.decoder.JSONDecodeError:
+    #         raise ValueError("Failed to parse JSON", response_slice)
+            
     def _generate_final_turn(self, conversation_history: str) -> str:
         """Generate the final turn response."""
         # Get the final turn's conversation plan

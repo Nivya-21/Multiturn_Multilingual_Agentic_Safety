@@ -97,11 +97,14 @@ class BaseAgent:
                 self.model = config["model"]
             elif self.provider == "ollama":
                 # Use the OpenAI client pointed at Ollama’s REST endpoint:
-                self.client = OpenAI(
-                    base_url=f"http://127.0.0.1:{config.get('port', 11434)}/v1",
-                    api_key="ollama",  # ensure no empty Bearer header
-                )
+                # self.client = OpenAI(
+                #     base_url=f"http://127.0.0.1:{config.get('port', 11434)}/v1",
+                #     api_key="ollama",  # ensure no empty Bearer header
+                # )
+                self.base_url = f"http://127.0.0.1:{config.get('port', 11434)}"
                 self.model = config["model"]
+                self.think = config.get("think", False) # Default to false if not in config
+                self.client = None # No OpenAI client needed for this provider
             elif self.provider == "together":
                 self.client = ai.Client()
                 self.model = f"{self.provider}:{config['model']}"
@@ -205,22 +208,33 @@ class BaseAgent:
                                 )
                             else:
                                 response = None  # Will be handled by caller
-
                 elif self.provider == "ollama":
-                    api_params = {
+                    payload = {
                         "model": self.model,
                         "messages": messages,
-                        "temperature": temperature,
-                        "max_tokens": 8192,  # set your desired context/outputlimit
+                        "stream": False,
+                        "think": self.think,
+                        "options": {"temperature": temperature},
                     }
-                    if response_format:
-                        api_params["response_format"] = response_format
-                    resp = self.client.chat.completions.create(**api_params)
-                    response = resp.choices[0].message.content
-                    # optional debug:
-                    from utils.sanitize import strip_reasoning
-                    safe = strip_reasoning(response)
-                    print("\n[ollama reply]:", safe)
+                    res = requests.post(f"{self.base_url}/api/chat", json=payload)
+                    res.raise_for_status()
+                    response = res.json()["message"]["content"]
+
+                # elif self.provider == "ollama":
+                #     api_params = {
+                #         "model": self.model,
+                #         "messages": messages,
+                #         "temperature": temperature,
+                #         "max_tokens": 8192,  # set your desired context/outputlimit
+                #     }
+                #     if response_format:
+                #         api_params["response_format"] = response_format
+                #     resp = self.client.chat.completions.create(**api_params)
+                #     response = resp.choices[0].message.content
+                #     # optional debug:
+                #     from utils.sanitize import strip_reasoning
+                #     safe = strip_reasoning(response)
+                #     print("\n[ollama reply]:", safe)
                 elif self.provider == "google" and "meta" in self.model:
                     response = self._call_google_meta_api(messages, temperature)
                 elif self.provider == "sglang":

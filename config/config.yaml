@@ -5,10 +5,11 @@ attacker:
   model: "qwen3:14b"
   port: 11500          # GPU-0
   temperature: 0.3
+  think: true
   max_retries: 10            # only one attempt
   max_turns: 5              # single-turn adversarial attempt
   plan_revision: true           # whether to extend unsuccessful plans that ran out of phases
-  run_all_strategies: false     # only require one successful strategy per behavior
+  run_all_strategies: true     # only require one successful strategy per behavior
   plans_file: "./strategies/attack_plans.json"
   strategies_per_behavior: 10 # only one strategy per behavior
 
@@ -16,6 +17,7 @@ target:
   provider: "ollama"
   model: "qwen3:8b"
   port: 11501          # GPU-1
+  think: false
   temperature: 0
   max_retries: 10             # single attempt against target
 
@@ -28,6 +30,7 @@ textgrad:
   model: "qwen3:32b"     # any model the server hosts
   port: 11502                 # <— match your running server
   temperature: 0
+  think: true
   max_retries: 10             # single optimization pass
   max_turns_per_phase: 4    # one gradient phase
 
@@ -45,14 +48,21 @@ multithreading:
 #   temperature: 0.5
 #   max_retries: 3
 attack_plan_generator:
-  provider: "openai"
-  model: "gpt-4o"
+  provider: "ollama"
+  model: "qwen3:32b"
+  port : 11502  
   temperature: 0.5
   max_retries: 3
   behavior_path: "./behaviors/harmbench_behaviors_text_test.csv"
   attack_plan_generation_dir: "./strategies"
   progress_dir: "./strategies/progress"
-  num_behaviors: 5
+  num_behaviors: 1
+
+generator:
+  # model_name: "meta-llama/Llama-3.1-8B-Instruct"
+  model_name : "Qwen/Qwen3-32B"
+  # Your Hugging Face token (can also be set as an environment variable)
+  auth_token: "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"
 
 evaluation:
   use_gpt_judge: false           # <— turn off GPT-only path

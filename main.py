@@ -139,6 +139,10 @@ def run_single_strategy(
             )
             tg_next_phase = (turns_per_phase == tg_config["max_turns_per_phase"])
 
+        print(f"{YELLOW}--- DEBUG: RAW 'turn_data' DICTIONARY FROM ATTACKER ---{ENDC}")
+        pprint.pprint(turn_data)
+        print(f"{YELLOW}--- END DEBUG ---{ENDC}")
+
         logging.info(f"\n{BLUE}Attacker Response:{ENDC}\n{turn_data['attacker']}")
         logging.info(f"\n{GREEN}Target Response:{ENDC}\n{turn_data['target_truncated']}")
         logging.info(f"\n{YELLOW}Evaluation Score: {turn_data['evaluation_score']}/5{ENDC}")
