@@ -62,7 +62,6 @@ generator:
   # model_name: "meta-llama/Llama-3.1-8B-Instruct"
   model_name : "Qwen/Qwen3-32B"
   # Your Hugging Face token (can also be set as an environment variable)
-  auth_token: "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"
 
 evaluation:
   use_gpt_judge: false           # <— turn off GPT-only path
