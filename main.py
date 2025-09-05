@@ -4,13 +4,14 @@ import json
 import logging
 import os
 import random
+import re
 from datetime import datetime
 
 import textgrad as tg
 import tqdm
 import yaml
 from agents.attacker_agent import AttackerAgent, TGAttackerAgent
-from agents.gpt_evaluator import  LlmEvaluator
+from agents.gpt_evaluator import LlmEvaluator
 from agents.target_model import TargetModel
 from tgd import TGBaseAgentEngine
 
@@ -18,6 +19,7 @@ BLUE = "\033[94m"
 GREEN = "\033[92m"
 YELLOW = "\033[93m"
 ENDC = "\033[0m"
+
 
 def _normalize_sets(attack_strategies):
     # Accept both dict {"Set_1": {...}} and legacy list [{"strategy_1":...}, ...]
@@ -38,15 +40,12 @@ def load_config(config_path):
             config["multithreading"],
         )
 
-
-def create_output_directory():
+def create_output_directory(base_dir="attacks"):
     """Create timestamped output directory for results"""
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    # Use a relative path or path in user's home directory
-    output_dir = os.path.join("attacks", timestamp)
+    output_dir = os.path.join(base_dir, timestamp)
     os.makedirs(output_dir, exist_ok=True)
     return output_dir
-
 
 def setup_logging(output_dir, debug=False):
     """Setup logging to both file and console with ANSI code handling"""
@@ -70,6 +69,9 @@ def setup_logging(output_dir, debug=False):
 
     # Setup basic config
     level = logging.DEBUG if debug else logging.INFO
+    # Remove existing handlers to avoid duplicate logs
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
     logging.basicConfig(level=level, handlers=[file_handler, console_handler])
 
 
@@ -78,7 +80,6 @@ def run_single_strategy(
 ):
     behavior = plan["behavior_details"]
 
-    # normalize here too (handles dict or legacy list)
     def _normalize_sets_local(attack_strategies):
         if isinstance(attack_strategies, list):
             return {f"Set_{i+1}": blob for i, blob in enumerate(attack_strategies) if isinstance(blob, dict)}
@@ -139,11 +140,11 @@ def run_single_strategy(
             )
             tg_next_phase = (turns_per_phase == tg_config["max_turns_per_phase"])
 
-        print(f"{YELLOW}--- DEBUG: RAW 'turn_data' DICTIONARY FROM ATTACKER ---{ENDC}")
-        pprint.pprint(turn_data)
-        print(f"{YELLOW}--- END DEBUG ---{ENDC}")
+        logging.info(f"{YELLOW}--- DEBUG: RAW 'turn_data' DICTIONARY FROM ATTACKER ---{ENDC}")
+        logging.info(turn_data)
+        logging.info(f"{YELLOW}--- END DEBUG ---{ENDC}")
 
-        logging.info(f"\n{BLUE}Attacker Response:{ENDC}\n{turn_data['attacker']}")
+        (f"\n{BLUE}Attacker Response:{ENDC}\n{turn_data['attacker']}")
         logging.info(f"\n{GREEN}Target Response:{ENDC}\n{turn_data['target_truncated']}")
         logging.info(f"\n{YELLOW}Evaluation Score: {turn_data['evaluation_score']}/5{ENDC}")
         logging.info(f"\n{YELLOW}Evaluation Reason: {turn_data['evaluation_reason']}{ENDC}")
@@ -179,7 +180,6 @@ def run_single_strategy(
             turns_per_phase += 1
 
     return strategy_result
-
 
 
 def run_single_behavior(plan, attacker_config, target_config, tg_config, eval_config):
@@ -220,30 +220,78 @@ def run_single_behavior(plan, attacker_config, target_config, tg_config, eval_co
         logging.warning("No runnable strategies found for this behavior; skipping.")
         return results_dict
 
-    take = min(attacker_config.get("strategies_per_behavior", 1), len(param_dicts))
-    for param_dict in random.sample(param_dicts, take):
-        result = run_single_strategy(**param_dict)
-        results_dict["strategies"].append(result)
-        if result.get("jailbreak_achieved") and not attacker_config["run_all_strategies"]:
-            logging.info("Skipping remaining strategies for this behavior.")
-            return results_dict
+    if not attacker_config["run_all_strategies"]:
+        param_dicts.sort(key=lambda p: (p['set_num'], p['strategy_num']))
+        
+        for param_dict in param_dicts:
+            result = run_single_strategy(**param_dict)
+            results_dict["strategies"].append(result)
+            if result.get("jailbreak_achieved"):
+                logging.info(f"Jailbreak achieved for behavior {behavior_number}. Halting further strategies for this behavior.")
+                break
+    else:
+        take = min(attacker_config.get("strategies_per_behavior", 1), len(param_dicts))
+        for param_dict in random.sample(param_dicts, take):
+            result = run_single_strategy(**param_dict)
+            results_dict["strategies"].append(result)
 
     return results_dict
 
+# ===== START: MODIFIED SUMMARY FUNCTION =====
+def calculate_summary(results, total_behaviors_in_plan):
+    """Calculates summary stats and returns them as a dictionary."""
+    processed_behaviors = results.get("behaviors", {})
+    jailbroken_behaviors_count = 0
+    for behavior_result in processed_behaviors.values():
+        if any(strategy.get("jailbreak_achieved") for strategy in behavior_result.get("strategies", [])):
+            jailbroken_behaviors_count += 1
+    
+    summary_data = {
+        "total_behaviors_in_plan": total_behaviors_in_plan,
+        "total_behaviors_processed": len(processed_behaviors),
+        "total_jailbroken_behaviors": jailbroken_behaviors_count,
+    }
+    return summary_data
+# ===== END: MODIFIED SUMMARY FUNCTION =====
 
-
-
-
-def main(debug, config_path):
+def main(debug, config_path, resume):
     """Test interaction between attacker and target model."""
-    # Create output directory and setup logging
-    output_dir = create_output_directory()
+    attacker_config, target_config, tg_config, eval_config, multithreading_config = load_config(config_path)
+
+    output_dir = None
+    results = {}
+    completed_behavior_numbers = set()
+
+    if resume:
+        base_dir = "attacks"
+        if os.path.exists(base_dir):
+            all_subdirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
+            timestamp_pattern = re.compile(r'^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$')
+            valid_timestamp_dirs = sorted([d for d in all_subdirs if timestamp_pattern.match(d)], reverse=True)
+            
+            if valid_timestamp_dirs:
+                latest_dir_name = valid_timestamp_dirs[0]
+                output_dir = os.path.join(base_dir, latest_dir_name)
+                results_path = os.path.join(output_dir, "all_results.json")
+
+                if os.path.exists(results_path):
+                    logging.info(f"Found existing results file: {results_path}")
+                    try:
+                        with open(results_path, "r", encoding='utf-8') as f:
+                            results = json.load(f)
+                        completed_behavior_numbers = set(results.get("behaviors", {}).keys())
+                        logging.info(f"Resuming run. Found {len(completed_behavior_numbers)} previously completed behaviors.")
+                    except (json.JSONDecodeError, IOError) as e:
+                        logging.error(f"Could not read results file at {results_path}: {e}. Starting a new run.")
+                        results = {}
+                else:
+                    logging.warning(f"Resume directory found, but no all_results.json file. Starting fresh in this directory.")
+    
+    if not output_dir:
+        output_dir = create_output_directory()
+
     setup_logging(output_dir, debug)
 
-    # Load configurations and initialize evaluator
-    attacker_config, target_config, tg_config, eval_config, multithreading_config = (
-        load_config(config_path)
-    )
     import sys
     for i, a in enumerate(sys.argv):
         if a in ("-L", "--language") and i + 1 < len(sys.argv):
@@ -251,63 +299,87 @@ def main(debug, config_path):
             break
     attacker_config.setdefault("attack_language", "auto")
 
-    # Load attack plans (use relative path)
     plans_file = attacker_config["plans_file"]
     with open(plans_file, "r") as f:
         attack_plans = json.load(f)
+    
+    total_behaviors_in_plan = len(attack_plans)
+
+    if completed_behavior_numbers:
+        attack_plans = [plan for plan in attack_plans if str(plan["behavior_number"]) not in completed_behavior_numbers]
+        logging.info(f"Starting with {len(attack_plans)} remaining behaviors to process.")
 
     tg_engine = TGBaseAgentEngine(tg_config)
     tg.set_backward_engine(tg_engine, override=True)
 
-    # Initialize results structure
-    results = {
-        "configuration": {
-            "attacker": attacker_config,
-            "target": target_config,
-            "textgrad": tg_config,
-            "evaluation": eval_config,
-        },
-        "behaviors": {},
-    }
+    if not results:
+        results = {
+            "configuration": {
+                "attacker": attacker_config,
+                "target": target_config,
+                "textgrad": tg_config,
+                "evaluation": eval_config,
+            },
+            "behaviors": {},
+        }
 
-    all_param_dicts = []
-
-    # Process each behavior
-    for plan in attack_plans:
-        all_param_dicts.append(
-            {
-                "plan": plan,
-                "attacker_config": attacker_config,
-                "target_config": target_config,
-                "eval_config": eval_config,
-                "tg_config": tg_config,
-            }
-        )
+    all_param_dicts = [
+        {
+            "plan": plan,
+            "attacker_config": attacker_config,
+            "target_config": target_config,
+            "eval_config": eval_config,
+            "tg_config": tg_config,
+        }
+        for plan in attack_plans
+    ]
+    
+    if not all_param_dicts:
+        logging.info("All behaviors have already been processed. Nothing to do.")
+        # ===== START: FINAL SUMMARY SAVE ON EXIT =====
+        summary_data = calculate_summary(results, total_behaviors_in_plan)
+        with open(os.path.join(output_dir, "summary.json"), "w") as f:
+            json.dump(summary_data, f, indent=4)
+        logging.info("Final summary file updated. Exiting.")
+        # ===== END: FINAL SUMMARY SAVE ON EXIT =====
+        return
 
     max_workers = multithreading_config.get("max_workers", 10)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(run_single_behavior, **pd): pd for pd in all_param_dicts
-        }
-        for future in tqdm.tqdm(
-            concurrent.futures.as_completed(futures), total=len(futures)
-        ):
+        futures = {executor.submit(run_single_behavior, **pd): pd for pd in all_param_dicts}
+        
+        progress_bar = tqdm.tqdm(concurrent.futures.as_completed(futures), total=len(futures))
+        for future in progress_bar:
             param_dict = futures[future]
-            behavior_result = future.result()
             behavior_number = param_dict["plan"]["behavior_number"]
             try:
-                results["behaviors"][behavior_number] = behavior_result
+                behavior_result = future.result()
+                results["behaviors"][str(behavior_number)] = behavior_result
 
-                # Save results in the timestamped directory
-                logging.info("Writing results to file")
+                # ===== START: SAVE TO SEPARATE SUMMARY FILE =====
+                # Calculate summary
+                summary_data = calculate_summary(results, total_behaviors_in_plan)
+                
+                # Update progress bar description from summary data
+                progress_bar.set_description(f"Processed: {summary_data['total_behaviors_processed']}/{summary_data['total_behaviors_in_plan']} | Jailbroken: {summary_data['total_jailbroken_behaviors']}")
+
+                # Save main results file (structure is unchanged)
+                logging.info("Writing results to all_results.json")
                 with open(os.path.join(output_dir, "all_results.json"), "w") as f:
                     json.dump(results, f, indent=4)
+                
+                # Save summary file
+                with open(os.path.join(output_dir, "summary.json"), "w") as f:
+                    json.dump(summary_data, f, indent=4)
+                # ===== END: SAVE TO SEPARATE SUMMARY FILE =====
+
             except Exception as e:
                 logging.error(
                     f"Behavior {behavior_number} generated an exception", exc_info=e
                 )
 
-    logging.info("Finished")
+    logging.info(f"Finished. Full results saved to {os.path.join(output_dir, 'all_results.json')}")
+    logging.info(f"Summary saved to {os.path.join(output_dir, 'summary.json')}")
 
 
 if __name__ == "__main__":
@@ -317,9 +389,9 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--debug", action="store_true", default=False)
     parser.add_argument("-c", "--config", action="store", default="config/config.yaml")
     parser.add_argument("-L", "--language", default=None, help="Attack language, e.g., 'Hindi', 'French', 'English', or 'auto'")
+    parser.add_argument("-r", "--resume", action="store_true", help="Resume the latest unfinished attack execution run.")
     args = parser.parse_args()
-    # Set debug=True for testing with first behavior and strategy only
-    # Set debug=False for full run
+    
     if args.debug:
         logging.info("Running in DEBUG mode")
-    main(debug=args.debug, config_path=args.config)
+    main(debug=args.debug, config_path=args.config, resume=args.resume)

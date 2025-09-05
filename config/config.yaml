@@ -2,21 +2,21 @@
 
 attacker:
   provider: "ollama"
-  model: "qwen3:14b"
-  port: 11500          # GPU-0
-  temperature: 0.3
+  model: "qwen3:32b"
+  port: 11502          # GPU-0
+  temperature: 0.5
   think: true
   max_retries: 10            # only one attempt
-  max_turns: 5              # single-turn adversarial attempt
+  max_turns: 10              # single-turn adversarial attempt
   plan_revision: true           # whether to extend unsuccessful plans that ran out of phases
-  run_all_strategies: true     # only require one successful strategy per behavior
+  run_all_strategies: false     # only require one successful strategy per behavior
   plans_file: "./strategies/attack_plans.json"
   strategies_per_behavior: 10 # only one strategy per behavior
 
 target:
   provider: "ollama"
-  model: "qwen3:8b"
-  port: 11501          # GPU-1
+  model: "qwen3:14b"
+  port: 11500          # GPU-1
   think: false
   temperature: 0
   max_retries: 10             # single attempt against target
@@ -49,25 +49,30 @@ multithreading:
 #   max_retries: 3
 attack_plan_generator:
   provider: "ollama"
-  model: "qwen3:32b"
-  port : 11502  
+  # model: "qwen3:32b"
+  # model: "qwen3:32b"
+  # port : 11502 
+  model: "qwen3:14b"
+  port: 11500
   temperature: 0.5
   max_retries: 3
   behavior_path: "./behaviors/harmbench_behaviors_text_test.csv"
   attack_plan_generation_dir: "./strategies"
-  progress_dir: "./strategies/progress"
-  num_behaviors: 1
+  progress_dir: "./strategies/progress_new"
+  num_behaviors: 319
 
 generator:
   # model_name: "meta-llama/Llama-3.1-8B-Instruct"
-  model_name : "Qwen/Qwen3-32B"
+  #"google/gemma-3-12b-it"
+  model_name : "google/gemma-3-12b-it"
+  auth_token: "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"
   # Your Hugging Face token (can also be set as an environment variable)
 
 evaluation:
   use_gpt_judge: false           # <— turn off GPT-only path
   judge_provider: "ollama"       # new: use BaseAgent('ollama')
   judge_model: "qwen3:32b"       # or "wao/qwen3-30b-a3b:latest"
-  judge_port: 11502              # your judge server port
+  judge_port: 11501              # your judge server port
   # judge_provider: "ollama"
   # judge_model: "wao/qwen3-30b-a3b:q4_K_M"
   # judge_port: 11502    # reuse GPU-2 instance

@@ -217,7 +217,6 @@ class AttackerAgent(BaseAgent):
 
         return self._extract_conversation(response)
 
-
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(1))
     def revise_plan(self, conversation_history: str = ""):
         """Extend a plan that has failed to meet its target (minimal changes, assertion-safe)."""
@@ -226,7 +225,6 @@ class AttackerAgent(BaseAgent):
             strategy=self.strategy,
             max_turns="as many turns as necessary",
             attack_language=self.config.get("attack_language", "auto"),
-
         )
     
         formatted_prompt = (
@@ -236,7 +234,7 @@ class AttackerAgent(BaseAgent):
             .replace("{old_plan}", json.dumps(self.strategy_dict, indent=4))
             .replace(
                 "{previous_turn_number}",
-                str(self.plan_phase - 1),  # Added for completeness
+                str(self.plan_phase - 1),
             )
         )
     
@@ -249,47 +247,107 @@ class AttackerAgent(BaseAgent):
         )
     
         try:
-            # Extract and parse the JSON
             response_slice = response[response.find("{") : response.rfind("}") + 1]
             new_strategy = json.loads(response_slice)
-    
+        
             plan = new_strategy.get("conversation_plan", {})
             if not isinstance(plan, dict):
-                raise ValueError("conversation_plan is missing or not a dictionary")
-    
-            # Ensure final_turn exists if missing (use your existing fallback behavior)
-            if "final_turn" not in plan:
-                keys = [k for k in plan.keys() if k.startswith("turn_")]
-                if keys:
-                    last_key = max(keys, key=lambda k: int(k.split("_")[1]))
-                    plan["final_turn"] = plan[last_key]
-                # else: leave it missing if there's no turn at all—don't inject content
-    
-            # Do NOT assert for per-turn presence; instead, count what's there
-            # Compute num_phases based on available 'turn_i' and presence of final_turn
-            turn_indices = []
-            for k in plan.keys():
-                if k.startswith("turn_"):
-                    try:
-                        idx = int(k.split("_")[1])
-                        turn_indices.append(idx)
-                    except Exception:
-                        pass
-    
-            # +1 for final_turn if present
-            if turn_indices:
-                self.num_phases = max(turn_indices) + (1 if "final_turn" in plan else 0)
-            else:
-                # if no numbered turns but final_turn exists, count as 1 phase
-                self.num_phases = 1 if "final_turn" in plan else 0
-    
-            # Save
-            new_strategy["conversation_plan"] = plan
+                raise ValueError("Revised plan's 'conversation_plan' is missing or not a dictionary.")
+            
+            # ===== START: CORRECTED LOGIC =====
+            # Recalculate the number of phases based on the keys in the NEW plan
+            turn_keys = [k for k in plan.keys() if k.startswith("turn_")]
+            final_turn_exists = "final_turn" in plan
+            
+            if not turn_keys and not final_turn_exists:
+                raise ValueError("Revised plan has no turns ('turn_X' or 'final_turn').")
+
+            # The total number of phases is the count of 'turn_X' keys plus the final turn.
+            self.num_phases = len(turn_keys) + 1 if final_turn_exists else len(turn_keys)
+            
+            # Update the strategy dict and strategy string
             self.strategy_dict = new_strategy
+            self.strategy = self._format_strategy(new_strategy)
+            # ===== END: CORRECTED LOGIC =====
+
             return self.strategy_dict
     
         except json.decoder.JSONDecodeError:
-            raise ValueError("Failed to parse JSON", response_slice)
+            raise ValueError("Failed to parse JSON from revised plan response", response_slice)
+
+
+    # @retry(stop=stop_after_attempt(5), wait=wait_fixed(1))
+    # def revise_plan(self, conversation_history: str = ""):
+    #     """Extend a plan that has failed to meet its target (minimal changes, assertion-safe)."""
+    #     formatted_system_prompt = self.system_prompt.format(
+    #         target_behavior=self.behavior,
+    #         strategy=self.strategy,
+    #         max_turns="as many turns as necessary",
+    #         attack_language=self.config.get("attack_language", "auto"),
+
+    #     )
+    
+    #     formatted_prompt = (
+    #         self.revise_plan_template.replace("{target_behavior}", self.behavior)
+    #         .replace("{turn_number}", str(self.plan_phase))
+    #         .replace("{conversation_history}", conversation_history)
+    #         .replace("{old_plan}", json.dumps(self.strategy_dict, indent=4))
+    #         .replace(
+    #             "{previous_turn_number}",
+    #             str(self.plan_phase - 1),  # Added for completeness
+    #         )
+    #     )
+    
+    #     response = self.call_api(
+    #         [
+    #             {"role": "system", "content": formatted_system_prompt},
+    #             {"role": "user", "content": formatted_prompt},
+    #         ],
+    #         temperature=self.config["temperature"],
+    #     )
+    
+    #     try:
+    #         # Extract and parse the JSON
+    #         response_slice = response[response.find("{") : response.rfind("}") + 1]
+    #         new_strategy = json.loads(response_slice)
+    
+    #         plan = new_strategy.get("conversation_plan", {})
+    #         if not isinstance(plan, dict):
+    #             raise ValueError("conversation_plan is missing or not a dictionary")
+    
+    #         # Ensure final_turn exists if missing (use your existing fallback behavior)
+    #         if "final_turn" not in plan:
+    #             keys = [k for k in plan.keys() if k.startswith("turn_")]
+    #             if keys:
+    #                 last_key = max(keys, key=lambda k: int(k.split("_")[1]))
+    #                 plan["final_turn"] = plan[last_key]
+    #             # else: leave it missing if there's no turn at all—don't inject content
+    
+    #         # Do NOT assert for per-turn presence; instead, count what's there
+    #         # Compute num_phases based on available 'turn_i' and presence of final_turn
+    #         turn_indices = []
+    #         for k in plan.keys():
+    #             if k.startswith("turn_"):
+    #                 try:
+    #                     idx = int(k.split("_")[1])
+    #                     turn_indices.append(idx)
+    #                 except Exception:
+    #                     pass
+    
+    #         # +1 for final_turn if present
+    #         if turn_indices:
+    #             self.num_phases = max(turn_indices) + (1 if "final_turn" in plan else 0)
+    #         else:
+    #             # if no numbered turns but final_turn exists, count as 1 phase
+    #             self.num_phases = 1 if "final_turn" in plan else 0
+    
+    #         # Save
+    #         new_strategy["conversation_plan"] = plan
+    #         self.strategy_dict = new_strategy
+    #         return self.strategy_dict
+    
+    #     except json.decoder.JSONDecodeError:
+    #         raise ValueError("Failed to parse JSON", response_slice)
     
     
 

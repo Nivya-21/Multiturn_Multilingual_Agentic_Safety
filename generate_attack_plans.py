@@ -26,6 +26,8 @@ def setup_logging(output_dir):
             record.msg = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", str(record.msg))
             return super().format(record)
 
+    # Ensure the directory exists before setting up the file handler
+    os.makedirs(output_dir, exist_ok=True)
     file_handler = logging.FileHandler(os.path.join(output_dir, "generation_log.txt"))
     file_handler.setFormatter(
         NoColorFormatter("%(asctime)s - %(threadName)s - %(levelname)s - %(message)s")
@@ -34,6 +36,10 @@ def setup_logging(output_dir):
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(logging.Formatter("%(message)s"))
 
+    # Remove existing handlers to avoid duplicate logs in case of re-setup
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+        
     logging.basicConfig(level=logging.INFO, handlers=[file_handler, console_handler])
 
 
@@ -42,6 +48,9 @@ def load_datasets(csv_path, number_of_behaviors=15):
     np.random.seed(27)
     df = pd.read_csv(csv_path)
     filtered_df = df[df["FunctionalCategory"] == "standard"]
+    # If number_of_behaviors is larger than the df, just return the whole df
+    if number_of_behaviors > len(filtered_df):
+        return filtered_df
     return filtered_df.sample(n=number_of_behaviors)
 
 def extract_json_from_output(raw_content: str) -> dict:
@@ -148,7 +157,7 @@ def generate_strategies(agent, messages, set_num, temperature, *, behavior_id, p
         combined.update(picked)
 
     if good_total == 0:
-        logging.warning("[warn] no valid strategies salvaged from this response; skipping.")
+        logging.warning(f"[warn] no valid strategies salvaged for behavior {behavior_id} in set {set_num}; response may have been a refusal or malformed.")
     else:
         logging.info(f"[info] saved {good_total} strategy(ies) for behavior {behavior_id}.")
 
@@ -201,6 +210,7 @@ def process_single_behavior(i, row, agent, temperature, progress_dir, num_sets=5
 
         message_data = {
             "behavior_index": i,
+            "behavior_id": behavior_id, # Add behavior_id for easier filtering
             "behavior": behavior,
             "set_number": set_num,
             "messages": messages,
@@ -213,7 +223,7 @@ def process_single_behavior(i, row, agent, temperature, progress_dir, num_sets=5
             set_num=set_num,
             temperature=temperature,
             behavior_id=behavior_id,
-            progress_dir=progress_dir,   # pass from config (see main)
+            progress_dir=progress_dir,
         )
 
         all_responses[f"Set_{set_num}"] = response
@@ -232,74 +242,155 @@ def main():
         "-L", "--language", default=None,
         help="Language for conversation snippets in the plan (e.g. 'Hindi', 'French', 'English', or 'auto')."
     )
+    args.add_argument(
+        "-r", "--resume", action="store_true",
+        help="Resume the latest unfinished attack plan generation run."
+    )
+    # ===== START: UPDATED ARGUMENT DEFINITION =====
+    args.add_argument(
+        "--resume-empty", action="store_true",
+        help="When resuming, re-generate plans for behaviors that have fewer than 10 total strategies. Implies --resume."
+    )
+    # ===== END: UPDATED ARGUMENT DEFINITION =====
     parsed_args = args.parse_args()
+
+    # If --resume-empty is used, it implies --resume
+    if parsed_args.resume_empty:
+        parsed_args.resume = True
 
     config_path = parsed_args.config
 
-    # Load configuration
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
 
-    # # Setup
-    # output_dir = create_output_directory(
-    #     config["attack_plan_generator"]["attack_plan_generation_dir"]
-    # )
     apg_cfg = config["attack_plan_generator"]
     if parsed_args.language:
         apg_cfg["attack_language"] = parsed_args.language
     else:
         apg_cfg.setdefault("attack_language", "auto")
+
     base_out_dir = apg_cfg["attack_plan_generation_dir"]
-    output_dir = create_output_directory(base_out_dir)
+    
+    output_dir = None
+    all_behaviors_data = []
+    all_messages = []
+    completed_behavior_ids = set()
+
+    if parsed_args.resume:
+        if os.path.exists(base_out_dir):
+            all_subdirs = [d for d in os.listdir(base_out_dir) if os.path.isdir(os.path.join(base_out_dir, d))]
+            timestamp_pattern = re.compile(r'^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$')
+            valid_timestamp_dirs = sorted([d for d in all_subdirs if timestamp_pattern.match(d)], reverse=True)
+            
+            if valid_timestamp_dirs:
+                latest_dir_name = valid_timestamp_dirs[0]
+                output_dir = os.path.join(base_out_dir, latest_dir_name)
+
+                attack_plans_path = os.path.join(output_dir, "attack_plans.json")
+                messages_path = os.path.join(output_dir, "all_messages.json")
+
+                if os.path.exists(attack_plans_path):
+                    try:
+                        with open(attack_plans_path, "r", encoding='utf-8') as f:
+                            loaded_behaviors = json.load(f)
+                        
+                        if not isinstance(loaded_behaviors, list):
+                            loaded_behaviors = []
+
+                        ids_to_rerun = set()
+                        if parsed_args.resume_empty:
+                            temp_behaviors_data = []
+                            for item in loaded_behaviors:
+                                # ===== START: MODIFIED LOGIC FOR "LESS THAN 10" =====
+                                # Count the total number of strategies for this behavior
+                                total_strategies = 0
+                                if 'attack_strategies' in item and isinstance(item['attack_strategies'], dict):
+                                    for set_name, strategies_in_set in item['attack_strategies'].items():
+                                        if isinstance(strategies_in_set, dict):
+                                            total_strategies += len(strategies_in_set)
+                                
+                                # Check if the total is less than 10
+                                if total_strategies < 10:
+                                    ids_to_rerun.add(item['behavior_details']['BehaviorID'])
+                                else:
+                                    temp_behaviors_data.append(item)
+                                # ===== END: MODIFIED LOGIC FOR "LESS THAN 10" =====
+                            
+                            if ids_to_rerun:
+                                logging.warning(f"Found {len(ids_to_rerun)} behaviors with fewer than 10 strategies. They will be re-processed.")
+                                all_behaviors_data = temp_behaviors_data
+                            else:
+                                all_behaviors_data = loaded_behaviors
+                        else:
+                            all_behaviors_data = loaded_behaviors
+
+                        completed_behavior_ids = {
+                            item['behavior_details']['BehaviorID']
+                            for item in all_behaviors_data
+                        }
+
+                        if os.path.exists(messages_path):
+                            with open(messages_path, "r", encoding='utf-8') as f:
+                                loaded_messages = json.load(f)
+                            if isinstance(loaded_messages, list):
+                                if ids_to_rerun:
+                                    all_messages = [msg for msg in loaded_messages if msg.get('behavior_id') not in ids_to_rerun]
+                                else:
+                                    all_messages = loaded_messages
+                    except (json.JSONDecodeError, IOError) as e:
+                        print(f"Warning: Could not read 'attack_plans.json': {e}. Starting fresh in directory.")
+    
+    if not output_dir:
+        output_dir = create_output_directory(base_out_dir)
+    
     setup_logging(output_dir)
+
+    if parsed_args.resume and (completed_behavior_ids or all_behaviors_data):
+        logging.info(f"Resuming run in directory: {output_dir}")
+        logging.info(f"Loaded {len(completed_behavior_ids)} behaviors that meet the criteria.")
+    else:
+        logging.info(f"Starting new run in directory: {output_dir}")
+
     agent = BaseAgent(config["attack_plan_generator"])
-    # NEW: progress_dir from config; fall back to base_out_dir/progress
-    progress_dir = apg_cfg.get("progress_dir",
-                               os.path.join(base_out_dir, "progress"))
-        # make sure dirs exist
+    progress_dir = apg_cfg.get("progress_dir", os.path.join(base_out_dir, "progress"))
     os.makedirs(base_out_dir, exist_ok=True)
     os.makedirs(progress_dir, exist_ok=True)
 
-    df = load_datasets(
-         apg_cfg["behavior_path"],
-         apg_cfg["num_behaviors"],
-    )
+    df_full = load_datasets(apg_cfg["behavior_path"], apg_cfg["num_behaviors"])
 
-    all_behaviors_data = []
-    all_messages = []
+    if completed_behavior_ids:
+        df = df_full[~df_full['BehaviorID'].isin(completed_behavior_ids)].copy()
+    else:
+        df = df_full
 
-    all_params = []
-    for i, row in df.iterrows():
-        all_params.append(
-            {
-                "i": i,
-                "row": row,
-                "agent": agent,
-                "temperature": apg_cfg["temperature"],
-                "progress_dir": progress_dir,   # <- pass into worker,
-            }
-        )
+    if df.empty:
+        logging.info("All specified behaviors have already been processed and meet the criteria. Nothing to do. Exiting.")
+        return
 
-    # Process each behavior
+    logging.info(f"Processing {len(df)} remaining behaviors.")
+
+    all_params = [
+        {"i": i, "row": row, "agent": agent, "temperature": apg_cfg["temperature"], "progress_dir": progress_dir}
+        for i, row in df.iterrows()
+    ]
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {
-            executor.submit(process_single_behavior, **args): args
-            for args in all_params
-        }
-        for future in tqdm.tqdm(
-            concurrent.futures.as_completed(futures), total=len(futures)
-        ):
-            behavior_result, messages_result = future.result()
-            all_behaviors_data.append(behavior_result)
-            all_messages += messages_result
-            # Save results
-            with open(os.path.join(output_dir, "attack_plans.json"), "w") as f:
-                json.dump(all_behaviors_data, f, indent=4, ensure_ascii=False)
+        futures = {executor.submit(process_single_behavior, **args): args for args in all_params}
+        for future in tqdm.tqdm(concurrent.futures.as_completed(futures), total=len(futures)):
+            try:
+                behavior_result, messages_result = future.result()
+                all_behaviors_data.append(behavior_result)
+                all_messages.extend(messages_result)
+                
+                with open(os.path.join(output_dir, "attack_plans.json"), "w", encoding='utf-8') as f:
+                    json.dump(all_behaviors_data, f, indent=4, ensure_ascii=False)
 
-            with open(os.path.join(output_dir, "all_messages.json"), "w") as f:
-                json.dump(all_messages, f, indent=4, ensure_ascii=False)
-    logging.info("Finished")
+                with open(os.path.join(output_dir, "all_messages.json"), "w", encoding='utf-8') as f:
+                    json.dump(all_messages, f, indent=4, ensure_ascii=False)
+            except Exception as exc:
+                logging.error(f'A behavior generation thread raised an exception: {exc}')
 
+    logging.info(f"Finished. All results saved in {output_dir}")
 
 if __name__ == "__main__":
     main()
