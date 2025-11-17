@@ -3,20 +3,22 @@
 attacker:
   provider: "ollama"
   model: "qwen3:32b"
-  port: 11502          # GPU-0
+  port: 11501          # GPU-0
   temperature: 0.5
   think: true
   max_retries: 10            # only one attempt
-  max_turns: 10              # single-turn adversarial attempt
+  max_turns: 7              # single-turn adversarial attempt
   plan_revision: true           # whether to extend unsuccessful plans that ran out of phases
   run_all_strategies: false     # only require one successful strategy per behavior
   plans_file: "./strategies/attack_plans.json"
-  strategies_per_behavior: 10 # only one strategy per behavior
+  strategies_per_behavior: 5 # only one strategy per behavior
 
 target:
   provider: "ollama"
-  model: "qwen3:14b"
-  port: 11500          # GPU-1
+  # model: "qwen3:14b"
+  # port: 11500          # GPU-1
+  model: "qwen3:32b"
+  port: 11501          # GPU-0
   think: false
   temperature: 0
   max_retries: 10             # single attempt against target
@@ -52,8 +54,8 @@ attack_plan_generator:
   # model: "qwen3:32b"
   # model: "qwen3:32b"
   # port : 11502 
-  model: "qwen3:14b"
-  port: 11500
+  model: "qwen3:32b"
+  port: 11501
   temperature: 0.5
   max_retries: 3
   behavior_path: "./behaviors/harmbench_behaviors_text_test.csv"
@@ -69,10 +71,12 @@ generator:
   # Your Hugging Face token (can also be set as an environment variable)
 
 evaluation:
-  use_gpt_judge: false           # <— turn off GPT-only path
+  use_gpt_judge: true           # <— turn off GPT-only path
   judge_provider: "ollama"       # new: use BaseAgent('ollama')
   judge_model: "qwen3:32b"       # or "wao/qwen3-30b-a3b:latest"
   judge_port: 11501              # your judge server port
+  require_llm_for_advance: true
+  think: true
   # judge_provider: "ollama"
   # judge_model: "wao/qwen3-30b-a3b:q4_K_M"
   # judge_port: 11502    # reuse GPU-2 instance

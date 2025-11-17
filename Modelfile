@@ -1,0 +1,3 @@
+# This is the content of the file named "Modelfile"
+FROM qwen3:32b
+PARAMETER quantization f16

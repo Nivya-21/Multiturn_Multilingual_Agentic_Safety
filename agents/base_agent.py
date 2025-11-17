@@ -13,6 +13,7 @@ import logging
 logging.getLogger("openai").setLevel(logging.INFO)
 from openai import OpenAI
 from vertexai.generative_models._generative_models import ResponseValidationError
+import json
 
 
 class APICallError(Exception):
@@ -129,6 +130,9 @@ class BaseAgent:
         temperature: float,
         response_format: Optional[Dict] = None,
         return_messages: bool = False,
+        *,                                 
+        extra_api_params: dict | None = None,
+        return_raw: bool = False,
     ) -> Union[str, Tuple[str, List[Dict]]]:
         """Universal API call handler with retries.
 
@@ -216,38 +220,33 @@ class BaseAgent:
                         "think": self.think,
                         "options": {"temperature": temperature},
                     }
+                    if extra_api_params:           # pass tools/tool_choice/etc.
+                        payload.update(extra_api_params)
+    
                     res = requests.post(f"{self.base_url}/api/chat", json=payload)
                     res.raise_for_status()
-                    response = res.json()["message"]["content"]
-
-                # elif self.provider == "ollama":
-                #     api_params = {
-                #         "model": self.model,
-                #         "messages": messages,
-                #         "temperature": temperature,
-                #         "max_tokens": 8192,  # set your desired context/outputlimit
-                #     }
-                #     if response_format:
-                #         api_params["response_format"] = response_format
-                #     resp = self.client.chat.completions.create(**api_params)
-                #     response = resp.choices[0].message.content
-                #     # optional debug:
-                #     from utils.sanitize import strip_reasoning
-                #     safe = strip_reasoning(response)
-                #     print("\n[ollama reply]:", safe)
+                    resp_json = res.json()
+    
+                    response = resp_json.get("message", {}).get("content", "")
+                    if return_raw:
+                        return response, resp_json
+    
                 elif self.provider == "google" and "meta" in self.model:
                     response = self._call_google_meta_api(messages, temperature)
+                    if return_raw:
+                        return response, {"message": {"content": response}}
+    
                 elif self.provider == "sglang":
-                    response = self.client.chat.completions.create(
+                    resp = self.client.chat.completions.create(
                         model=self.model,
                         messages=messages,
                         temperature=temperature,
                         max_tokens=8192,
-                        # you can also raise the total context window if needed:
                     )
-                    print(f"\n[DEBUG] RAW MODEL RESPONSE OBJECT:\n{response}\n")
-                    print(f"[DEBUG] RAW RESPONSE CONTENT:\n{getattr(response.choices[0].message, 'content', None)}\n")
-                    response = response.choices[0].message.content
+                    response = resp.choices[0].message.content
+                    if return_raw:
+                        return response, resp
+    
                 else:
                     api_params = {
                         "model": self.model,
@@ -256,11 +255,13 @@ class BaseAgent:
                     }
                     if response_format:
                         api_params["response_format"] = response_format
-
-                    response = self.client.chat.completions.create(**api_params)
-                    response = response.choices[0].message.content
-
-                # Return based on return_messages flag
+                    if extra_api_params:
+                        api_params.update(extra_api_params)
+                    resp = self.client.chat.completions.create(**api_params)
+                    response = resp.choices[0].message.content
+                    if return_raw:
+                        return response, resp
+    
                 return (response, messages) if return_messages else response
 
             except Exception as e:

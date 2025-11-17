@@ -1,0 +1,40 @@
+{
+  "group_id": "abadc22eebf7e2e790aee625f630a923",
+  "records": [
+    {
+      "turn_local0": 0,
+      "score": 3,
+      "score_nudged": 3,
+      "margin_baseline": 0.5732687373402365,
+      "margin_nudged": 0.5732687373402365
+    },
+    {
+      "turn_local0": 1,
+      "score": 3,
+      "score_nudged": 3,
+      "margin_baseline": 0.1886707677662087,
+      "margin_nudged": 0.1886707677662087
+    },
+    {
+      "turn_local0": 2,
+      "score": 3,
+      "score_nudged": 2,
+      "margin_baseline": -0.035993196123039986,
+      "margin_nudged": -0.035993196123039986
+    },
+    {
+      "turn_local0": 3,
+      "score": 1,
+      "score_nudged": 3,
+      "margin_baseline": -0.035993196123039986,
+      "margin_nudged": -0.035993196123039986
+    },
+    {
+      "turn_local0": 4,
+      "score": 5,
+      "score_nudged": 1,
+      "margin_baseline": -0.03599319612304043,
+      "margin_nudged": -0.03599319612304043
+    }
+  ]
+}

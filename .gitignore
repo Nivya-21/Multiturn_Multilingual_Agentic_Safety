@@ -186,3 +186,17 @@ Miniforge3-Linux-x86_64.sh
 Miniforge3-Linux-x86_64.sh
 .env
 Miniforge3-Linux-x86_64.sh
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv/
+venv/
+.DS_Store
+.vscode/
+.idea/
+attacks/
+**/execution_log.txt
+**/all_results.json
+**/summary.json

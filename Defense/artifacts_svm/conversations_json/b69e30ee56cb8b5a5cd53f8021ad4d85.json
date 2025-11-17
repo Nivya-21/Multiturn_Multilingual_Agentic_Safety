@@ -1,0 +1,26 @@
+{
+  "group_id": "b69e30ee56cb8b5a5cd53f8021ad4d85",
+  "records": [
+    {
+      "turn_local0": 0,
+      "score": 3,
+      "score_nudged": 3,
+      "margin_baseline": 1.3185338678253147,
+      "margin_nudged": 0.8991337157854191
+    },
+    {
+      "turn_local0": 1,
+      "score": 4,
+      "score_nudged": 3,
+      "margin_baseline": 0.9865787372166487,
+      "margin_nudged": 0.7945346498791513
+    },
+    {
+      "turn_local0": 2,
+      "score": 5,
+      "score_nudged": 3,
+      "margin_baseline": 0.9865787372166506,
+      "margin_nudged": 0.7945346498791529
+    }
+  ]
+}

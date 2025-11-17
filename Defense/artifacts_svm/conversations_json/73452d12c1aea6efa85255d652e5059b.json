@@ -1,0 +1,19 @@
+{
+  "group_id": "73452d12c1aea6efa85255d652e5059b",
+  "records": [
+    {
+      "turn_local0": 0,
+      "score": 4,
+      "score_nudged": null,
+      "margin_baseline": 0.8513801826934919,
+      "margin_nudged": 0.06577268860831412
+    },
+    {
+      "turn_local0": 1,
+      "score": 5,
+      "score_nudged": null,
+      "margin_baseline": 1.2016401426737693,
+      "margin_nudged": 1.0529480424785789
+    }
+  ]
+}
