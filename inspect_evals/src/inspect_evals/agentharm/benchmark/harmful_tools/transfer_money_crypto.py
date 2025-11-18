@@ -1,4 +1,6 @@
 from inspect_ai.tool import Tool, tool
+from .semantics import semantic_lookup
+
 
 valid_wallets = [
     "0x5d5acA289F2A9E481fa2aEaD3FA465880Df84354",
