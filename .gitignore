@@ -199,3 +199,6 @@ attacks/
 **/execution_log.txt
 **/all_results.json
 **/summary.json
+
+# For EPFL RCP systems
+runai_output.txt

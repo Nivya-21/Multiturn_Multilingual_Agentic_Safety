@@ -27,7 +27,7 @@ class BaseAgent:
 
     Configuration structure:
     {
-        "provider": "openai|google|anthropic|sglang|ollama|together|openrouter",  # Required: API provider
+        "provider": "openai|google|anthropic|sglang|ollama|together|openrouter|epfl_rcp",  # Required: API provider
         "model": "model-name",                                # Required: Model identifier
         "temperature": 0.7,                                   # Required: Temperature for sampling
         "max_retries": 3,                                     # Optional: Number of retries (default: 3)
@@ -164,6 +164,7 @@ class BaseAgent:
                 "retry_delay": 3,
                 "jitter": 1,
             },  # Add OpenRouter configuration
+            "epfl_rcp": {"base_delay": 1, "retry_delay": 3, "jitter": 1},
         }
 
         config = provider_configs[self.provider]
@@ -246,7 +247,16 @@ class BaseAgent:
                     response = resp.choices[0].message.content
                     if return_raw:
                         return response, resp
-    
+
+                elif self.provider == "epfl_rcp":
+                    completion = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        # seed=1,
+                        temperature=temperature,
+                    )
+                    response = completion.choices[0].message.content
+
                 else:
                     api_params = {
                         "model": self.model,
