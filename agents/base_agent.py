@@ -116,6 +116,12 @@ class BaseAgent:
                         }
                     }
                 )
+            elif self.provider == "epfl_rcp":
+                self.client = OpenAI(
+                    base_url="https://inference.rcp.epfl.ch/v1",
+                    api_key=self.config["provider_key"], # You can configure the API key in your code
+                )
+                self.model = config['model']
             else:
                 # For all other providers
                 self.client = ai.Client()

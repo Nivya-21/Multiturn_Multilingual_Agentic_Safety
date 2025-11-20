@@ -49,10 +49,10 @@ attack_plan_generator:
   model: "Qwen/Qwen3-Next-80B-A3B-Instruct"
   temperature: 0.5
   max_retries: 3
-  behavior_path: "./behaviors/harmbench_behaviors_text_test.csv"
+  behavior_path: "./behaviors/harmbench_behaviors_text_test_12beh.csv"
   attack_plan_generation_dir: "./strategies"
   progress_dir: "./strategies/progress_new"
-  num_behaviors: 1000
+  num_behaviors: 12
 
 
 generator:
