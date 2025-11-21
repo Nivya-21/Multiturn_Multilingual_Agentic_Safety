@@ -1,33 +1,26 @@
 # config/config.yaml
 
 attacker:
-  provider: "ollama"
-  model: "qwen3:32b"
-  port: 11501          # GPU-0
+  provider: "epfl_rcp"
+  provider_key: "sk-_Z1xNaV9TzEto9Osul01Bg"
+  model: "Qwen/Qwen3-Next-80B-A3B-Instruct"
   temperature: 0.5
-  think: true
-  max_retries: 10            # only one attempt
-  max_turns: 7              # single-turn adversarial attempt
+  max_retries: 3            # only one attempt
+  max_turns: 10              # single-turn adversarial attempt
   plan_revision: true           # whether to extend unsuccessful plans that ran out of phases
   run_all_strategies: false     # only require one successful strategy per behavior
-  plans_file: "./strategies/attack_plans.json"
-  strategies_per_behavior: 5 # only one strategy per behavior
+  plans_file: "./strategies/2025-11-20_23-21-43/attack_plans.json"
+  strategies_per_behavior: 5
 
 target:
-  provider: "ollama"
-  # model: "qwen3:14b"
-  # port: 11500          # GPU-1
-  model: "qwen3:32b"
-  port: 11501          # GPU-0
-  think: false
+  provider: "epfl_rcp"
+  provider_key: "sk-_Z1xNaV9TzEto9Osul01Bg"
+  model: "Qwen/Qwen3-Next-80B-A3B-Instruct"
   temperature: 0
-  max_retries: 10             # single attempt against target
+  max_retries: 3             # single attempt against target
 
 textgrad:
   enabled: false
-  # provider: "openrouter"
-  # model: "qwen/qwen-2.5-72b-instruct:free"
-  # no port needed for cloud provider
   provider: "ollama"          # was "openrouter"
   model: "qwen3:32b"     # any model the server hosts
   port: 11502                 # <— match your running server
@@ -42,18 +35,16 @@ attack_validation:
 multithreading:
   max_workers: 1
 
-
 attack_plan_generator:
   provider: "epfl_rcp"
   provider_key: "sk-_Z1xNaV9TzEto9Osul01Bg"
   model: "Qwen/Qwen3-Next-80B-A3B-Instruct"
   temperature: 0.5
   max_retries: 3
-  behavior_path: "./behaviors/harmbench_behaviors_text_test_12beh.csv"
+  behavior_path: "./behaviors/harmbench_behaviors_text_test.csv"
   attack_plan_generation_dir: "./strategies"
   progress_dir: "./strategies/progress_new"
-  num_behaviors: 12
-
+  num_behaviors: 176
 
 generator:
   model_name : "google/gemma-3-12b-it"
@@ -62,8 +53,7 @@ generator:
 
 evaluation:
   use_gpt_judge: true           # <— turn off GPT-only path
-  judge_provider: "ollama"       # new: use BaseAgent('ollama')
-  judge_model: "qwen3:32b"       # or "wao/qwen3-30b-a3b:latest"
-  judge_port: 11501              # your judge server port
+  judge_provider: "epfl_rcp"
+  judge_provider_key: "sk-_Z1xNaV9TzEto9Osul01Bg"              # your judge server port
+  judge_model: "Qwen/Qwen3-Next-80B-A3B-Instruct"
   require_llm_for_advance: true
-  think: true

@@ -118,7 +118,7 @@ class BaseAgent:
                 )
             elif self.provider == "epfl_rcp":
                 self.client = OpenAI(
-                    base_url="https://inference.rcp.epfl.ch/v1",
+                    base_url="https://inference-rcp.epfl.ch/v1",
                     api_key=self.config["provider_key"], # You can configure the API key in your code
                 )
                 self.model = config['model']
@@ -263,6 +263,8 @@ class BaseAgent:
                     )
                     response = completion.choices[0].message.content
 
+                    if return_raw:
+                        return response, completion.model_dump()
                 else:
                     api_params = {
                         "model": self.model,
